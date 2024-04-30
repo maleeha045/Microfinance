@@ -1,0 +1,60 @@
+name: Microk8s-CICD
+
+on:
+  push:
+    branches: [beta]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: matesol/financemate-ui
+  CI: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm i --force
+      - run: npm run build --if-present
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ${{ secrets.DOCKER_UNAME }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./Dockerfile
+          cache-from: none
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:beta
+          labels: ${{ steps.meta.outputs.labels }}
+          
+  deploy_to_k8s_server:
+    name: Deploy to Microk8s
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Hit Webhook
+        uses: distributhor/workflow-webhook@v2
+        env:
+          webhook_url: http://20.233.34.36:9000/hooks/finmate-ui
+          webhook_secret: none

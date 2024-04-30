@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <div>
+        <button onclick="storeBorrowerDetails()">storeDetails</button>
+        <button onclick="approve()">approve</button>
+        <button onclick="connectWallet()">connectWallet</button>
+        <button onClick="addKey()">addKey</button>
+    </div>
+</body>
+<script src="https://cdn.ethers.io/scripts/ethers-v4.min.js" charset="utf-8" type="text/javascript">
+</script>
+<script src="./helpers.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@onchain-id/solidity@2.2.1"></script>
+
+<script>
+    function deployIdentityProxy(implementationAuthority, managementKey, signer) {
+        return new Promise(function (resolve, reject) {
+            // Assuming OnchainID is defined with contracts and their ABIs
+            const OnchainID = window['@onchain-id/solidity'];
+
+            const IdentityProxyABI = OnchainID.contracts.IdentityProxy.abi;
+            const IdentityProxyBytecode = OnchainID.contracts.IdentityProxy.bytecode;
+
+            new ethers.ContractFactory(IdentityProxyABI, IdentityProxyBytecode, signer)
+                .deploy(implementationAuthority, managementKey)
+                .then(function (identity) {
+                    resolve(ethers.getContractAt('Identity', identity.address, signer));
+                })
+                .catch(function (error) {
+                    reject(error);
+                });
+        });
+    }
+
+
+
+    async function addKey() {
+
+        const tokenAgentPrivateKey = "df57089febbacf7ba0bc227dafbffa9fc08a93fdc68e1e42411a14efcf23656e";
+        const TokenAgent = new ethers.Wallet(tokenAgentPrivateKey);
+        const claimIssuerPrivateKey = "0x689af8efa8c651a91ad287602527f3af2fe9f6501a7ac4b061667b5a93e037fd";
+        const ClaimIssuer = new ethers.Wallet(claimIssuerPrivateKey);
+        const walletPrivateKey = '0xea6c44ac03bff858b476bba40716402b03e41b8e97e276d1baec7c37d42484a0';
+
+        // Create ethers wallet instance using private key
+        const wallet = new ethers.Wallet(walletPrivateKey);
+
+        // Create provider
+        const provider = new ethers.providers.JsonRpcProvider("http://127.0.0.1:8545/");
+        // Use wallet to connect to provider
+        const deployer = wallet.connect(provider);
+        const tokenAgent = TokenAgent.connect(provider);
+        const claimIssuer = ClaimIssuer.connect(provider);
+        // // Request access to the user's Ethereum account
+        const account = new ethers.providers.Web3Provider(window.ethereum);
+        await account.send('eth_requestAccounts', []);
+        const lender = account.getSigner();
+        const lenderAddress = await lender.getAddress();
+        const identityRegistryAddress = "0xcD5EDDD2A58d418Ab8939905fcd823B6AbE09c0c"
+        const identityRegistryABI = ["function registerIdentity(address,address,uint16)"];
+        const identityRegistry = new ethers.Contract(identityRegistryAddress, identityRegistryABI, deployer);
+        const identityImplementationAuthorityAddress = "0xacC09486C9e34aa1Dff13b2E64d5482A3648D018";
+        const lenderIdentity = await deployIdentityProxy(identityImplementationAuthorityAddress, lenderAddress, deployer);
+
+        await lenderIdentity.connect(lender).addKey(ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(['address'], [lenderAddress])), 2, 1);
+        await identityRegistry
+            .connect(tokenAgent)
+            .registerIdentity(lenderAddress, lenderIdentity.address, 42);
+        const claimTopics = [ethers.utils.id('CLAIM_TOPIC')];
+        const claimForSigner = {
+            data: ethers.utils.hexlify(ethers.utils.toUtf8Bytes('Some claim public data.')),
+            issuer: claimIssuerContractAddress,
+            topic: claimTopics[0],
+            scheme: 1,
+            identity: lenderIdentity.getAddress(),
+            signature: '',
+        };
+        claimForSigner.signature = await claimIssuer.signMessage(
+            ethers.utils.arrayify(
+                ethers.utils.keccak256(
+                    ethers.utils.defaultAbiCoder.encode(['address', 'uint256', 'bytes'], [claimForSigner.identity, claimForSigner.topic, claimForSigner.data]),
+                ),
+            ),
+        );
+
+        await lenderIdentity
+            .connect(lender)
+            .addClaim(claimForSigner.topic, claimForSigner.scheme, claimForSigner.issuer, claimForSigner.signature, claimForSigner.data, '');
+        const token = new ethers.Contract(tokenAddress, tokenABI, deployer);
+        await token.connect(tokenAgent).mint(lenderAddress, 1000);
+        console.log("done");
+    }
+</script>
+
+
+<script>
+
+    async function storeBorrowerDetails() {
+        const walletPrivateKey = '0xea6c44ac03bff858b476bba40716402b03e41b8e97e276d1baec7c37d42484a0';
+
+        // Create ethers wallet instance using private key
+        const wallet = new ethers.Wallet(walletPrivateKey);
+
+        // Create provider
+        const provider = new ethers.providers.JsonRpcProvider("http://127.0.0.1:8545/");
+        // Use wallet to connect to provider
+        const deployer = wallet.connect(provider);
+
+
+        const borrower = "0x8626f6940E2eb28930eFb4CeF49B2d1F2C9C1199";
+        const lendingBorrowingAddress = "0xDA4De69034Dc411fdf7d2CcDb3C7294E6e33346e";
+        const lendingBorrowingABI = [
+            "function storeBorrowerDetails(address,uint256,uint256,string,uint256)",
+            "function getBorrowerDetails(address)view returns(tuple(uint256,address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,string,bool))",
+            "function depositFunds(address,uint256,address)"
+        ];
+        const lendingBorrowing = new ethers.Contract(lendingBorrowingAddress, lendingBorrowingABI, deployer);
+        await lendingBorrowing.connect(deployer).storeBorrowerDetails(borrower, 1000, 24, "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol", 2)
+        const result = await lendingBorrowing.getBorrowerDetails(borrower);
+        console.log(result);
+        // console.log(result.principal.toNumber());
+
+    }
+
+    const ARBITRUM_CHAIN_ID = '0x66eee';
+
+    async function connectWallet() {
+        // Check if MetaMask is installed
+        if (window.ethereum) {
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: '0x7A69' }], // chainId must be in hexadecimal numbers
+                });
+                // Request account access if needed
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+
+                console.log("Wallet connected:", accounts[0]);
+
+            } catch (error) {
+                console.error("User denied account access");
+                return null;
+            }
+        } else {
+            console.error("MetaMask not found");
+            return null;
+        }
+    }
+
+    async function approve() {
+        const lenderProvider = new ethers.providers.Web3Provider(window.ethereum);
+        // console.log(lenderProvider);
+        // const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        // const lenderAddress = accounts[0];
+        const provider = new ethers.providers.JsonRpcProvider("http://127.0.0.1:8545/");
+        // Request access to the user's Ethereum account
+        await lenderProvider.send('eth_requestAccounts', []);
+        const lender = lenderProvider.getSigner();
+        const walletPrivateKey = '0xea6c44ac03bff858b476bba40716402b03e41b8e97e276d1baec7c37d42484a0';
+
+        // Create ethers wallet instance using private key
+        const wallet = new ethers.Wallet(walletPrivateKey);
+        const deployer = wallet.connect(provider);
+        console.log(deployer.address);
+        const usdtAddress = "0xe8d785FddF9b14bbce50e097BD71b0426a475063";
+        const erc20Abi = ["function approve(address,uint256)",
+            "function transferFrom(address,address,uint256)"];
+        const usdtToken = new ethers.Contract(usdtAddress, erc20Abi, deployer);
+        const mainContractAddress = "0xaaF158923aDD9763a4eF5fDFB55992E5a3aEEC8d";
+        const amountToApprove = 100;
+        await usdtToken.connect(lender).approve(mainContractAddress, amountToApprove);
+
+    }
+
+</script>
+
+</html>
